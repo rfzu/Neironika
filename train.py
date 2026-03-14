@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from datetime import datetime
 
 import torch
@@ -52,6 +53,10 @@ logger = setup_logging()
 
 def log(msg):
     logger.info(msg)
+
+
+def log_error(msg):
+    logger.exception(msg)
 
 
 class VerboseTrainerCallback(TrainerCallback):
@@ -108,6 +113,14 @@ def main():
         log(f"❌ Не найден файл датасета: {DATA_FILE}")
         raise FileNotFoundError(DATA_FILE)
 
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA недоступна, обучение на GPU не запустится")
+
+    log(f"PyTorch: {torch.__version__}")
+    log(f"CUDA available: {torch.cuda.is_available()}")
+    log(f"GPU: {torch.cuda.get_device_name(0)}")
+    log(f"CUDA capability: {torch.cuda.get_device_capability(0)}")
+
     log("1/7 Загрузка токенизатора...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     if tokenizer.pad_token is None:
@@ -128,9 +141,9 @@ def main():
         MODEL_NAME,
         quantization_config=bnb_config,
         device_map="auto",
-        torch_dtype=torch.float16,
     )
     model = prepare_model_for_kbit_training(model)
+    model.config.use_cache = False
     log("✅ Базовая модель загружена и подготовлена")
 
     log("4/7 Применение LoRA...")
@@ -168,8 +181,9 @@ def main():
         logging_steps=5,
         save_steps=50,
         save_total_limit=2,
-        fp16=True,
+        fp16=False,
         bf16=False,
+        max_grad_norm=0.0,
         dataloader_num_workers=0,
         report_to=[],
         optim="paged_adamw_8bit",
@@ -196,11 +210,20 @@ def main():
     log(f"✅ Модель и токенизатор сохранены в {OUTPUT_DIR}")
 
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     log("🧹 Память очищена")
     log("Готово")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.exception("❌ Критическая ошибка во время обучения")
+        try:
+            with open("last_error.txt", "w", encoding="utf-8") as f:
+                f.write(f"{type(e).__name__}: {e}\n\n")
+                f.write(traceback.format_exc())
+        except Exception:
+            logger.exception("❌ Не удалось записать last_error.txt")
+        raise
