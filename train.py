@@ -1,140 +1,206 @@
 #!/usr/bin/env python3
-"""
-🚀 SVP LoRA Trainer — подробные логи обучения
-1110 примеров → эксперт по системно-векторной психологии
-"""
+# -*- coding: utf-8 -*-
 
-import torch
+import gc
+import logging
+import os
+import sys
 import time
 from datetime import datetime
-from transformers import (
-    AutoModelForCausalLM, 
-    AutoTokenizer,
-    TrainingArguments, 
-    BitsAndBytesConfig  # ← вот этого не хватало
-)
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+
+import torch
 from datasets import load_dataset
-import gc
-
-
-print("=" * 70)
-print("🧠 SVP LoRA TRAINER — 1110 примеров")
-print(f"⏰ Started: {datetime.now().strftime('%H:%M:%S')}")
-print("=" * 70)
-
-# Шаг 1
-print("\n📥 1/7 Загрузка модели и токенизатора...")
-model_name = "huihui-ai/Llama-3.2-3B-Instruct-abliterated"
-print(f"   Модель: {model_name}")
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-tokenizer.pad_token = tokenizer.eos_token
-print("   ✅ Токенизатор готов")
-
-# Шаг 2
-print("\n⚙️  2/7 4-bit квантизация для RTX 1080...")
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    TrainerCallback,
+    TrainingArguments,
 )
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    quantization_config=bnb_config,
-    device_map="auto",
-)
-model = prepare_model_for_kbit_training(model)
-print("   ✅ Модель загружена (4-bit)")
+from trl import SFTTrainer
 
-# Шаг 3  
-print("\n🔧 3/7 LoRA адаптеры...")
-lora_config = LoraConfig(
-    r=32, lora_alpha=64,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    lora_dropout=0.05,
-    bias="none", task_type="CAUSAL_LM",
-)
-model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
-print("   ✅ LoRA готов (32 rank)")
-
-# Шаг 4
-print("\n📚 4/7 Загрузка датасета...")
-dataset = load_dataset("json", data_files="merged_dataset_formatted.jsonl", split="train")
-print(f"   📊 Примеров: {len(dataset)}")
-print(f"   📝 Средняя длина: {dataset[0]['text'][:100]}...")
-
-def formatting_prompts_func(example):
-    return {"text": example["text"]}
-dataset = dataset.map(formatting_prompts_func)
-print("   ✅ Датасет готов")
-
-# Шаг 5
-print("\n🎯 5/7 Конфигурация тренировки...")
-training_args = TrainingArguments(
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=2,
-    warmup_steps=10,
-    num_train_epochs=3,
-    learning_rate=1e-4,
-    fp16=True,
-    logging_steps=5,                # каждые 5 шагов
-    save_steps=50,
-    output_dir="./svp_lora_verbose",
-    optim="paged_adamw_8bit",
-    report_to=None,
-    dataloader_num_workers=0,
-)
-
-trainer = SFTTrainer(
-    model=model,
-    processing_class=tokenizer,  # ← вот это исправление
-    train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=2048,
-    packing=False,
-    args=training_args,
-)
+MODEL_NAME = "huihui-ai/Llama-3.2-3B-Instruct-abliterated"
+DATA_FILE = "merged_dataset_formatted.jsonl"
+OUTPUT_DIR = "./svp_lora_verbose"
+LOG_FILE = "train.log"
 
 
-print("   ✅ Тренер настроен")
+def setup_logging():
+    logger = logging.getLogger("svp_lora")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
 
-# Шаг 6 — ТРЕНИРОВКА с подробными логами
-print("\n🚀 6/7 НАЧИНАЕМ ОБУЧЕНИЕ...")
-print("Шаг  | Эпоха | Loss | Примеры/сек | VRAM")
-print("-" * 45)
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
-class VerboseCallback:
+    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    return logger
+
+
+logger = setup_logging()
+
+
+def log(msg):
+    logger.info(msg)
+
+
+class VerboseTrainerCallback(TrainerCallback):
     def __init__(self):
         self.start_time = time.time()
-    
-    def on_step_end(self, args, state, control, **kwargs):
-        if state.global_step % 5 == 0:
-            elapsed = time.time() - self.start_time
-            speed = state.global_step / elapsed if elapsed > 0 else 0
-            vram = torch.cuda.memory_allocated() / 1024**3 if torch.cuda.is_available() else 0
-            
-            print(f"{state.global_step:4d} | {state.epoch:4.1f} | "
-                  f"{state.log_history[-1]['train_loss']:5.2f} | "
-                  f"{speed:9.1f} | {vram:5.1f}GB")
 
-trainer.add_callback(VerboseCallback())
-print("   Callback для логов добавлен")
+    def on_train_begin(self, args, state, control, **kwargs):
+        log("🚀 Обучение началось")
+        log(f"Всего шагов: {state.max_steps}")
 
-# Шаг 7
-print("\n🎓 7/7 ТРЕНИРУЕМ (Ctrl+C для остановки)...")
-trainer.train()
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
 
-print("\n" + "=" * 70)
-print("✅ ОБУЧЕНИЕ ЗАВЕРШЕНО!")
-print(f"⏰ Закончено: {datetime.now().strftime('%H:%M:%S')}")
-print("📁 Модель: ./svp_lora_verbose")
-print("\n🧪 Тест:")
-print("python test_svp_expert.py")
-print("=" * 70)
+        elapsed = time.time() - self.start_time
+        steps_per_min = state.global_step / elapsed * 60 if elapsed > 0 and state.global_step > 0 else 0
+        vram_alloc = torch.cuda.memory_allocated() / 1024**3 if torch.cuda.is_available() else 0
+        vram_reserved = torch.cuda.memory_reserved() / 1024**3 if torch.cuda.is_available() else 0
 
-# Очистка памяти
-gc.collect()
-torch.cuda.empty_cache()
+        parts = [
+            f"step={state.global_step}",
+            f"epoch={state.epoch:.2f}" if state.epoch is not None else "epoch=?",
+        ]
+
+        if "loss" in logs:
+            parts.append(f"loss={logs['loss']:.4f}")
+        if "learning_rate" in logs:
+            parts.append(f"lr={logs['learning_rate']:.2e}")
+        if "grad_norm" in logs:
+            parts.append(f"grad_norm={logs['grad_norm']:.4f}")
+
+        parts.append(f"steps/min={steps_per_min:.2f}")
+        parts.append(f"vram_alloc={vram_alloc:.2f}GB")
+        parts.append(f"vram_reserved={vram_reserved:.2f}GB")
+
+        log(" | ".join(parts))
+
+    def on_save(self, args, state, control, **kwargs):
+        log(f"💾 Чекпоинт сохранён на шаге {state.global_step}")
+
+    def on_train_end(self, args, state, control, **kwargs):
+        elapsed = time.time() - self.start_time
+        log(f"✅ Обучение завершено за {elapsed / 60:.1f} мин")
+
+
+def main():
+    start_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log("=" * 80)
+    log("🧠 SVP LoRA TRAINER")
+    log(f"Старт: {start_ts}")
+    log("=" * 80)
+
+    if not os.path.exists(DATA_FILE):
+        log(f"❌ Не найден файл датасета: {DATA_FILE}")
+        raise FileNotFoundError(DATA_FILE)
+
+    log("1/7 Загрузка токенизатора...")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    log("✅ Токенизатор загружен")
+
+    log("2/7 Настройка 4-bit квантизации...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    log("✅ Конфиг bitsandbytes готов")
+
+    log("3/7 Загрузка базовой модели...")
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=torch.float16,
+    )
+    model = prepare_model_for_kbit_training(model)
+    log("✅ Базовая модель загружена и подготовлена")
+
+    log("4/7 Применение LoRA...")
+    lora_config = LoraConfig(
+        r=32,
+        lora_alpha=64,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    log("✅ LoRA адаптеры подключены")
+
+    log("5/7 Загрузка датасета...")
+    dataset = load_dataset("json", data_files=DATA_FILE, split="train")
+    log(f"✅ Датасет загружен, записей: {len(dataset)}")
+    log(f"Колонки датасета: {dataset.column_names}")
+
+    if "text" not in dataset.column_names:
+        raise ValueError("В датасете нет колонки 'text'")
+
+    sample = dataset[0]["text"][:200].replace("\n", "\\n")
+    log(f"Пример текста: {sample}...")
+
+    log("6/7 Настройка TrainingArguments...")
+    training_args = TrainingArguments(
+        output_dir=OUTPUT_DIR,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=2,
+        num_train_epochs=3,
+        learning_rate=1e-4,
+        warmup_steps=10,
+        logging_steps=5,
+        save_steps=50,
+        save_total_limit=2,
+        fp16=True,
+        dataloader_num_workers=0,
+        report_to=[],
+        optim="paged_adamw_8bit",
+        remove_unused_columns=False,
+        logging_dir="./logs",
+    )
+    log("✅ TrainingArguments готовы")
+
+    log("7/7 Создание SFTTrainer...")
+    trainer = SFTTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+        processing_class=tokenizer,
+    )
+    trainer.add_callback(VerboseTrainerCallback())
+    log("✅ SFTTrainer создан")
+
+    log("🎓 Запуск trainer.train() ...")
+    trainer.train()
+
+    log("💾 Сохранение финального адаптера...")
+    trainer.save_model(OUTPUT_DIR)
+    tokenizer.save_pretrained(OUTPUT_DIR)
+    log(f"✅ Модель и токенизатор сохранены в {OUTPUT_DIR}")
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    log("🧹 Память очищена")
+    log("Готово")
+
+
+if __name__ == "__main__":
+    main()
