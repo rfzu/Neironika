@@ -90,13 +90,14 @@ training_args = TrainingArguments(
 
 trainer = SFTTrainer(
     model=model,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,  # ← вот это исправление
     train_dataset=dataset,
     dataset_text_field="text",
     max_seq_length=2048,
     packing=False,
     args=training_args,
 )
+
 
 print("   ✅ Тренер настроен")
 
