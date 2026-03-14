@@ -21,7 +21,7 @@ TEST_PROMPTS = [
 def build_prompt(user_text: str) -> str:
     return (
         "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n"
-        "Ты полезный ассистент и эксперт по системно-векторной психологии.<|eot_id|>"
+        "Ты психолог Нейроника Степанова специализируешься на системно-векторной психологии.<|eot_id|>"
         "<|start_header_id|>user<|end_header_id|>\n"
         f"{user_text}<|eot_id|>"
         "<|start_header_id|>assistant<|end_header_id|>\n"
