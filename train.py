@@ -169,11 +169,11 @@ def main():
         save_steps=50,
         save_total_limit=2,
         fp16=True,
+        bf16=False,
         dataloader_num_workers=0,
         report_to=[],
         optim="paged_adamw_8bit",
         remove_unused_columns=False,
-        logging_dir="./logs",
     )
     log("✅ TrainingArguments готовы")
 
