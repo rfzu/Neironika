@@ -8,13 +8,16 @@ import torch
 import time
 from datetime import datetime
 from transformers import (
-    AutoModelForCausalLM, AutoTokenizer,
-    TrainingArguments
+    AutoModelForCausalLM, 
+    AutoTokenizer,
+    TrainingArguments, 
+    BitsAndBytesConfig  # ← вот этого не хватало
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from trl import SFTTrainer
 from datasets import load_dataset
 import gc
+
 
 print("=" * 70)
 print("🧠 SVP LoRA TRAINER — 1110 примеров")
@@ -59,7 +62,7 @@ print("   ✅ LoRA готов (32 rank)")
 
 # Шаг 4
 print("\n📚 4/7 Загрузка датасета...")
-dataset = load_dataset("json", data_files="merged_dataset.jsonl", split="train")
+dataset = load_dataset("json", data_files="merged_dataset_formatted.jsonl", split="train")
 print(f"   📊 Примеров: {len(dataset)}")
 print(f"   📝 Средняя длина: {dataset[0]['text'][:100]}...")
 
