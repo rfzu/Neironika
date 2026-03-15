@@ -30,7 +30,6 @@ SYSTEM_PROMPT = (
 
 # Настройки генерации
 MAX_NEW_TOKENS = 300
-
 USE_SAMPLING = True
 TEMPERATURE = 0.7
 TOP_P = 0.9
@@ -56,6 +55,7 @@ def load_model():
     )
 
     print("Загрузка базовой модели...")
+    print(f"Using model: {BASE_MODEL}")
     base_model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL,
         quantization_config=bnb_config,
