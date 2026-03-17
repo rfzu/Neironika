@@ -9,6 +9,7 @@ import os
 import sys
 import ctypes
 import json
+import time
 
 # === НАСТРОЙКИ ===
 # Обновлённая модель с LoRA (Q8_0)
@@ -86,12 +87,14 @@ def chat_once(llm, history, user_msg, system_prompt=None, stream=True):
     # Добавляем системный промпт только если он задан
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    
+
     messages.extend(history)
     messages.append({"role": "user", "content": user_msg})
-    
+
     print("\n🤖 Модель:\n", end="", flush=True)
-    
+
+    start_time = time.time()
+
     if stream:
         answer_parts = []
         output = llm.create_chat_completion(
@@ -125,7 +128,10 @@ def chat_once(llm, history, user_msg, system_prompt=None, stream=True):
         )
         answer = output["choices"][0]["message"]["content"].strip()
         print(answer)
-    
+
+    elapsed = time.time() - start_time
+    print(f"\n(генерация заняла {elapsed:.1f} с)")
+
     history.append({"role": "assistant", "content": answer})
     print("\n" + "="*80 + "\n")
     return answer
