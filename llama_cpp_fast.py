@@ -3,19 +3,37 @@ Llama 3.2-3B через llama.cpp (GGUF)
 Быстрый инференс без потери качества (Q8_0)
 """
 import os
+import sys
+
+# Добавляем пути к CUDA DLL в PATH
+venv_path = os.path.dirname(sys.executable)
+dll_dirs = [
+    os.path.join(venv_path, "Lib", "site-packages", "nvidia", "cublas", "bin"),
+    os.path.join(venv_path, "Lib", "site-packages", "nvidia", "cuda_runtime", "bin"),
+    os.path.join(venv_path, "Lib", "site-packages", "nvidia", "cudnn", "bin"),
+    os.path.join(venv_path, "Lib", "site-packages", "llama_cpp", "lib"),
+]
+
+# Добавляем в PATH для ctypes
+os.environ["PATH"] = ";".join(dll_dirs) + ";" + os.environ.get("PATH", "")
+
+# Добавляем пути к DLL
+for dll_dir in dll_dirs:
+    if os.path.exists(dll_dir):
+        os.add_dll_directory(dll_dir)
+
 from llama_cpp import Llama
 
 # === НАСТРОЙКИ ===
 CACHE_DIR = r"D:\code\LLM_LoRA\.cache"
-MODEL_PATH = r"D:\code\LLM_LoRA\models\llama3.2-3b-abliterated-q8_0.gguf"
-# Скачать модель: https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-abliterated-GGUF
+MODEL_PATH = r"D:\code\LLM_LoRA\models\Llama-3.2-3B-Instruct-abliterated.Q8_0.gguf"
+# Скачать модель: https://huggingface.co/MaziyarPanahi/Llama-3.2-3B-Instruct-abliterated-GGUF
 
 # Параметры
 N_CTX = 4096          # контекст
 N_THREADS = 8         # потоки CPU
-N_GPU_LAYERS = 35     # слои на GPU (для 3B = все слои, макс ~35)
-N_BATCH = 512         # батч для префилла
 N_GPU_LAYERS = 35     # слои на GPU (для 3B = все слои)
+N_BATCH = 512         # батч для префилла
 
 
 def load_model():
@@ -23,12 +41,13 @@ def load_model():
     if not os.path.exists(MODEL_PATH):
         print(f"❌ Модель не найдена: {MODEL_PATH}")
         print("\n📥 Скачайте GGUF модель:")
-        print("https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-abliterated-GGUF")
+        print("https://huggingface.co/MaziyarPanahi/Llama-3.2-3B-Instruct-abliterated-GGUF")
         print("\nРекомендуемые квантования:")
-        print("  - Q8_0  — без потерь качества (~4 ГБ)")
-        print("  - Q6_K  — минимальные потери (~3.5 ГБ)")
-        print("  - Q5_K_M — хороший баланс (~3 ГБ)")
-        print("\nПоместите файл в папку models/")
+        print("  - Q8_0  — без потерь качества (~3 ГБ)")
+        print("  - Q6_K  — минимальные потери (~2.7 ГБ)")
+        print("  - Q5_K_M — хороший баланс (~2.5 ГБ)")
+        print("\nКоманда для скачивания:")
+        print("  python download_gguf.py")
         return None
     
     print(f"Загрузка модели: {MODEL_PATH}")
@@ -74,12 +93,12 @@ def chat_once(llm, history, user_msg,
     ]
     messages.extend(history)
     messages.append({"role": "user", "content": user_msg})
-    
+
     print("\n🤖 Модель:\n", end="", flush=True)
-    
+
     if stream:
-        # Streaming вывод
-        output = llm(
+        answer_parts = []
+        output = llm.create_chat_completion(
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -88,18 +107,20 @@ def chat_once(llm, history, user_msg,
             repeat_penalty=repeat_penalty,
             stream=True,
         )
-        
-        answer_parts = []
         for chunk in output:
-            delta = chunk["choices"][0]["text"]
-            print(delta, end="", flush=True)
-            answer_parts.append(delta)
-        
+            # Безопасный парсинг delta
+            try:
+                delta_content = chunk["choices"][0]["delta"].get("content", "")
+            except (KeyError, IndexError):
+                delta_content = ""
+            if delta_content:
+                print(delta_content, end="", flush=True)
+                answer_parts.append(delta_content)
         answer = "".join(answer_parts).strip()
         print()  # newline после ответа
     else:
         # Без streaming
-        output = llm(
+        output = llm.create_chat_completion(
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -108,10 +129,9 @@ def chat_once(llm, history, user_msg,
             repeat_penalty=repeat_penalty,
             stream=False,
         )
-        
-        answer = output["choices"][0]["text"].strip()
+        answer = output["choices"][0]["message"]["content"].strip()
         print(answer)
-    
+
     # Сохраняем в историю
     history.append({"role": "assistant", "content": answer})
     print("\n" + "="*60 + "\n")
@@ -125,7 +145,7 @@ def main():
     
     history = []
     
-    print("🚀 Llama 3.2-3B Abliterated (llama.cpp + GGUF)")
+    print("🚀 Llama 3.2-3B Instruct (llama.cpp + GGUF)")
     print("Команды: 'exit' / 'выход' / 'clear' (очистить историю)")
     print("="*60 + "\n")
     
